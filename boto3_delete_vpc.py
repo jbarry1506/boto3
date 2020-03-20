@@ -17,11 +17,30 @@ Word of warning: This will delete the VPC and all instances/resources
 associated with it. As far as I know, this is complete. It's just like
 selecting Delete from the context menu on a VPC in the AWS Console except
 that this also deletes internet gateways that are attached to the VPC.
+******************************************************************************
+
+Altered!  This is not the original code.  I should have forked it, but I abide
+by any and all licenses associated with this piece of code.
+
+jbarry1506
+
 """
 
 import sys
 import boto3
+import vars
 
+"""
+To delete a VPC, it is necessary to handle the following preliminary items
+    # Terminate all instances
+    # Delete all subnets
+    # Delete custom security groups 
+    # and custom route tables
+    # Detach any internet gateways 
+    # or virtual private gateways
+
+This code should get any necessary information for that purpose
+"""
 
 def vpc_cleanup(vpcid):
     """Remove VPC from AWS
@@ -29,25 +48,43 @@ def vpc_cleanup(vpcid):
 
     :param vpcid: id of vpc to delete
     """
+
+    # TODO:  Throw a valid error here
     if not vpcid:
         return
-    print('Removing VPC ({}) from AWS'.format(vpcid))
+
+    ec2client = boto3.client('ec2')
     ec2 = boto3.resource('ec2')
-    ec2client = ec2.meta.client
-    vpc = ec2.Vpc(vpcid)
+    
+    # identify the VPC    
+    vpc_response = ec2client.describe_vpcs(
+        VpcIds = [vpcid]
+    )
+    # pprint(response)
+
+    print('Removing VPC ({}) from AWS'.format(vpcid))
+
+    vpc = ec2.Vpc(vpc_response['Vpcs'][0]['VpcId'])
+
     # detach and delete all gateways associated with the vpc
     for gw in vpc.internet_gateways.all():
+        print("detatching and deleting ({})".format(gw))
         vpc.detach_internet_gateway(InternetGatewayId=gw.id)
         gw.delete()
+
     # delete all route table associations
     for rt in vpc.route_tables.all():
         for rta in rt.associations:
             if not rta.main:
+                print("detatching and deleting ({})".format(rta))
                 rta.delete()
+
     # delete any instances
     for subnet in vpc.subnets.all():
         for instance in subnet.instances.all():
+            print("detatching and deleting ({})".format(instance))
             instance.terminate()
+
     # delete our endpoints
     for ep in ec2client.describe_vpc_endpoints(
             Filters=[{
@@ -55,33 +92,39 @@ def vpc_cleanup(vpcid):
                 'Values': [vpcid]
             }])['VpcEndpoints']:
         ec2client.delete_vpc_endpoints(VpcEndpointIds=[ep['VpcEndpointId']])
+
     # delete our security groups
     for sg in vpc.security_groups.all():
         if sg.group_name != 'default':
             sg.delete()
+
     # delete any vpc peering connections
     for vpcpeer in ec2client.describe_vpc_peering_connections(
             Filters=[{
                 'Name': 'requester-vpc-info.vpc-id',
                 'Values': [vpcid]
             }])['VpcPeeringConnections']:
-        ec2.VpcPeeringConnection(vpcpeer['VpcPeeringConnectionId']).delete()
+        ec2client.VpcPeeringConnection(vpcpeer['VpcPeeringConnectionId']).delete()
+
     # delete non-default network acls
     for netacl in vpc.network_acls.all():
         if not netacl.is_default:
             netacl.delete()
+
     # delete network interfaces
     for subnet in vpc.subnets.all():
         for interface in subnet.network_interfaces.all():
             interface.delete()
         subnet.delete()
+
     # finally, delete the vpc
     ec2client.delete_vpc(VpcId=vpcid)
 
 
-def main(argv=None):
-    vpc_cleanup(argv[1])
+def main():
+    vpc_id = vars.unknown_vpc_id
+    vpc_cleanup(vpc_id)
 
 
 if __name__ == '__main__':
-    main(sys.argv)
+    main()
