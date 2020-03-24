@@ -28,6 +28,7 @@ jbarry1506
 
 import sys
 import boto3
+from pprint import pprint
 import vars
 
 """
@@ -66,20 +67,46 @@ def vpc_cleanup(vpcid):
 
     vpc = ec2.Vpc(vpc_response['Vpcs'][0]['VpcId'])
 
+    # TODO this is not complete
+    # get endpoints for deletion
+    vpc_endpoints = ec2client.describe_vpc_endpoints()
+    for vpce in vpc_endpoints:
+        pprint(vpce)
+
     # detach and delete all gateways associated with the vpc
     for gw in vpc.internet_gateways.all():
         print("detatching and deleting ({})".format(gw))
         vpc.detach_internet_gateway(InternetGatewayId=gw.id)
         gw.delete()
 
+    # delete any vpc peering connections
+    for vpcpeer in ec2client.describe_vpc_peering_connections(
+            Filters=[{
+                'Name': 'requester-vpc-info.vpc-id',
+                'Values': [vpcid]
+            }])['VpcPeeringConnections']:
+        ec2client.VpcPeeringConnection(vpcpeer['VpcPeeringConnectionId']).delete()
+
+    # delete our security groups
+    for sg in vpc.security_groups.all():
+        if sg.group_name != 'default':
+            sg.delete()
+
     # delete all route table associations
     for rt in vpc.route_tables.all():
+        pprint(rt.id)
         for rta in rt.associations:
+            pprint(rta)
             if not rta.main:
                 print("detatching and deleting ({})".format(rta))
                 rta.delete()
+            else:
+                rta_sr = rta.get_available_subresources()
+                pprint(rta_sr)
+        print("Deleting route table {}".format(rt.id))
+        if not rt.associations: rt.delete()
 
-    # delete any instances
+    # delete any subnets
     for subnet in vpc.subnets.all():
         for instance in subnet.instances.all():
             print("detatching and deleting ({})".format(instance))
@@ -92,19 +119,6 @@ def vpc_cleanup(vpcid):
                 'Values': [vpcid]
             }])['VpcEndpoints']:
         ec2client.delete_vpc_endpoints(VpcEndpointIds=[ep['VpcEndpointId']])
-
-    # delete our security groups
-    for sg in vpc.security_groups.all():
-        if sg.group_name != 'default':
-            sg.delete()
-
-    # delete any vpc peering connections
-    for vpcpeer in ec2client.describe_vpc_peering_connections(
-            Filters=[{
-                'Name': 'requester-vpc-info.vpc-id',
-                'Values': [vpcid]
-            }])['VpcPeeringConnections']:
-        ec2client.VpcPeeringConnection(vpcpeer['VpcPeeringConnectionId']).delete()
 
     # delete non-default network acls
     for netacl in vpc.network_acls.all():
