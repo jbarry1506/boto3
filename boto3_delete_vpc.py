@@ -61,9 +61,9 @@ def vpc_cleanup(vpcid):
     vpc_response = ec2client.describe_vpcs(
         VpcIds = [vpcid]
     )
-    # pprint(response)
+    pprint(vpc_response)
 
-    print('Removing VPC ({}) from AWS'.format(vpcid))
+    print('Start Removing VPC ({}) from AWS'.format(vpcid))
 
     vpc = ec2.Vpc(vpc_response['Vpcs'][0]['VpcId'])
 
@@ -132,8 +132,14 @@ def vpc_cleanup(vpcid):
         subnet.delete()
 
     # finally, delete the vpc
-    ec2client.delete_vpc(VpcId=vpcid)
-
+    print("Deleting VPC {}".format(vpcid))
+    try:
+        ec2client.delete_vpc(VpcId=vpcid)
+    except:
+        print('VPC DELETE FAILED!')
+        pprint(ec2client.__exception__[1]['args'])
+        pprint(ec2client.__exception__[1]['operation_name'])
+        exit(1)
 
 def main():
     vpc_id = vars.unknown_vpc_id
